@@ -2,87 +2,75 @@
 
 pragma solidity ^0.8.0;
 
-contract Reflections {
-    string public constant name = "Reflections Token";
-    string public constant symbol = "REFL";
-    uint256 public constant decimals = 18;
-    uint256 public constant totalSupply = 100000000 * 10 ** decimals;
+contract ReflectToken {
+    string public name = "Reflect Token";
+    string public symbol = "RFT";
+    uint256 public totalSupply = 100000000 * 10**18; // 100 million tokens
+    uint8 public decimals = 18;
 
-    mapping(address => uint256) private _balances;
-    mapping(address => mapping(address => uint256)) private _allowances;
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
 
-    address payable public constant devWallet = payable(0x1234567890123456789012345678901234567890);
+    uint256 public buyTaxRate = 300;
+    uint256 public sellTaxRate = 300;
+    uint256 public reflectionRate = 200;
+    uint256 public devRate = 100;
 
-    uint256 public reflectionFee = 2;
-    uint256 public devFee = 1;
-    uint256 public totalFees = reflectionFee + devFee;
+    address public devWallet;
 
-    uint256 private constant MAX = ~uint256(0);
-    uint256 private constant _tTotal = totalSupply;
-    uint256 private _rTotal = (MAX - (MAX % _tTotal));
-    uint256 private _tFeeTotal;
+    event Transfer(address indexed from, address indexed to, uint256 value);
 
-    mapping(address => bool) private _excluded;
-    address[] private _excludedAddresses;
-
-    event Transfer(address from, address to, uint256 amount);
-
-    constructor () {
-        _balances[msg.sender] = _rTotal;
-        emit Transfer(address(0), msg.sender, _tTotal);
+    constructor() {
+        balanceOf[msg.sender] = totalSupply;
+        devWallet = msg.sender;
     }
 
-   
+    function _transfer(address from, address to, uint256 value) internal {
+        require(from != address(0), "Transfer from the zero address");
+        require(to != address(0), "Transfer to the zero address");
+        require(value > 0, "Transfer amount must be greater than zero");
+        require(balanceOf[from] >= value, "Insufficient balance");
 
-    function balanceOf(address account) public view returns (uint256) {
-        if (_excluded[account]) {
-            return _balances[account];
-        } else {
-            return tokenFromReflection(_balances[account]);
+        uint256 buyTax = 0;
+        uint256 sellTax = 0;
+
+        if (to == address(this)) { // buy transaction
+            buyTax = value * buyTaxRate / 10000;
+            balanceOf[devWallet] += buyTax * devRate / 10000;
+        } else if (from == address(this)) { // sell transaction
+            sellTax = value * sellTaxRate / 10000;
+            balanceOf[devWallet] += sellTax * devRate / 10000;
         }
+
+        uint256 reflectionAmount = (buyTax + sellTax) * reflectionRate / 10000;
+        balanceOf[address(this)] += reflectionAmount;
+        balanceOf[from] -= value;
+        balanceOf[to] += value - buyTax - sellTax - reflectionAmount;
+
+        emit Transfer(from, to, value);
     }
 
-    function transfer(address recipient, uint256 amount) public returns (bool) {
-        _transfer(msg.sender, recipient, amount);
+    function transfer(address to, uint256 value) public returns (bool success) {
+        _transfer(msg.sender, to, value);
         return true;
     }
 
-    function allowance(address owner, address spender) public view returns (uint256) {
-        return _allowances[owner][spender];
-    }
-
-    function approve(address spender, uint256 amount) public returns (bool) {
-        _approve(msg.sender, spender, amount);
+    function transferFrom(address from, address to, uint256 value) public returns (bool success) {
+        allowance[from][msg.sender] -= value;
+        _transfer(from, to, value);
         return true;
     }
 
-    function transferFrom(address sender, address recipient, uint256 amount) public returns (bool) {
-        _transfer(sender, recipient, amount);
-        _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);
-        return true;
+    function setDevWallet(address newDevWallet) public {
+        require(msg.sender == devWallet, "Only the dev wallet can change the dev wallet address");
+        devWallet = newDevWallet;
     }
 
-    function increaseAllowance(address spender, uint256 addedValue) public returns (bool) {
-        _approve(msg.sender, spender, _allowances[msg.sender][spender] + addedValue);
-        return true;
+    function getEthReflection() public {
+        require(balanceOf[msg.sender] >= 1000 * 10**18, "Minimum balance not met");
+        uint256 ethAmount = balanceOf[msg.sender] * reflectionRate / totalSupply;
+        balanceOf[msg.sender] -= ethAmount;
+        payable(msg.sender).transfer(ethAmount);
     }
-
-    function decreaseAllowance(address spender, uint256 subtractedValue) public returns (bool) {
-        _approve(msg.sender, spender, _allowances[msg.sender][spender] - subtractedValue);
-        return true;
-    }
-
-    function isExcluded(address account) public view returns (bool) {
-        return _excluded[account];
-    }
-
-    
-    function deliver(uint256 tAmount) public {
-        address sender = msg.sender;
-        uint256 rAmount = reflectionFromToken(tAmount);
-        _rOwned[sender] = _rOwned[sender] - rAmount;
-        _rTotal = _rTotal - rAmount;
-        _tFeeTotal = _tFeeTotal + tAmount;
-    }
-
 }
+
